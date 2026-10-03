@@ -1,0 +1,40 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/taskflow_notifications}
+    username: ${SPRING_DATASOURCE_USERNAME:taskflow}
+    password: ${SPRING_DATASOURCE_PASSWORD:taskflow}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: taskflow-notifications
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.taskflow.notificationservice.notification,com.taskflow.taskservice.task
+        spring.json.value.default.type: com.taskflow.notificationservice.notification.TaskEvent
+        spring.json.use.type.headers: false
+
+taskflow:
+  kafka:
+    task-events-topic: ${TASKFLOW_KAFKA_TASK_EVENTS_TOPIC:task-events}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
