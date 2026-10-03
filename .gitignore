@@ -22,3 +22,7 @@ target/
 .env
 .env.*
 !.env.example
+
+# Generated / temporary files
+tmp/
+output/
