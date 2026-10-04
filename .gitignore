@@ -26,3 +26,9 @@ target/
 # Generated / temporary files
 tmp/
 output/
+
+
+# Environment / secrets
+.env
+.env.*
+!.env.example

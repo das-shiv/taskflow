@@ -1,0 +1,195 @@
+# TaskFlow local Docker Compose environment
+#
+# This file is intended for LOCAL DEVELOPMENT / INTEGRATION TESTING.
+# It runs the complete TaskFlow stack in Docker:
+#   - PostgreSQL for task-service
+#   - PostgreSQL for notification-service
+#   - Redis cache
+#   - Kafka (single-node KRaft)
+#   - task-service
+#   - notification-service
+#   - React frontend served by Nginx
+#
+# Credentials are intentionally loaded from the local .env file instead of
+# being committed to Git. Create .env from .env.example before starting.
+#
+# Container-to-container communication uses Docker service names:
+#   postgres -> task-service database
+#   postgres-notifications -> notification-service database
+#   redis -> task-service cache
+#   kafka:29092 -> Kafka internal listener
+#
+# Host port mappings are provided so the services can also be tested from
+# the host machine/browser:
+#   frontend              http://localhost:5173
+#   task-service          http://localhost:8080
+#   notification-service  http://localhost:8081
+#   PostgreSQL            localhost:5432
+#   notification DB       localhost:5433
+#   Redis                 localhost:6379
+#   Kafka                 localhost:9092
+
+services:
+
+  # Main PostgreSQL database used by task-service.
+  postgres:
+    image: postgres:16
+    container_name: taskflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: taskflow
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist database data across container recreation.
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - taskflow
+
+  # Separate PostgreSQL database used by notification-service.
+  # It is exposed on host port 5433 to avoid conflicting with the main DB.
+  postgres-notifications:
+    image: postgres:16
+    container_name: taskflow-postgres-notifications
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: taskflow_notifications
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-notifications-data:/var/lib/postgresql/data
+    networks:
+      - taskflow
+
+  # Redis is used by task-service for caching.
+  redis:
+    image: redis:7
+    container_name: taskflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      # Persist Redis data across container recreation.
+      - redis-data:/data
+    networks:
+      - taskflow
+
+  # Single-node Kafka running in KRaft mode (no ZooKeeper).
+  #
+  # Kafka exposes two listeners:
+  #   INTERNAL -> used by application containers (kafka:29092)
+  #   EXTERNAL -> used by tools running on the host (localhost:9092)
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: taskflow-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # Controller, internal broker traffic, and host-access listener.
+      KAFKA_LISTENERS: CONTROLLER://:9093,INTERNAL://:29092,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # This is a single-node local development cluster, so replication
+      # factors are intentionally set to 1.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # Fixed cluster ID so the local Kafka volume can be reused consistently.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+    volumes:
+      # Persist Kafka data across container recreation.
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - taskflow
+
+  # Spring Boot task-service.
+  # It connects to the other containers through Docker DNS/service names,
+  # rather than localhost.
+  task-service:
+    image: taskflow-task-service:local
+    container_name: taskflow-task-service
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      SERVER_PORT: 8080
+
+      # "postgres" is the Compose service name, so Docker resolves it
+      # to the PostgreSQL container's IP address.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/taskflow
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+
+      # Applications inside the Compose network use Kafka's internal listener.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TASKFLOW_KAFKA_TASK_EVENTS_TOPIC: task-events
+    ports:
+      - "8080:8080"
+    networks:
+      - taskflow
+
+  # Spring Boot notification-service.
+  # It consumes task events from Kafka and stores notifications in its
+  # separate PostgreSQL database.
+  notification-service:
+    image: taskflow-notification-service:local
+    container_name: taskflow-notification-service
+    depends_on:
+      - postgres-notifications
+      - kafka
+    environment:
+      SERVER_PORT: 8081
+
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-notifications:5432/taskflow_notifications
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TASKFLOW_KAFKA_TASK_EVENTS_TOPIC: task-events
+    ports:
+      - "8081:8081"
+    networks:
+      - taskflow
+
+  # React frontend built into an Nginx image.
+  # The browser accesses it through localhost:5173.
+  frontend:
+    image: taskflow-frontend:local
+    container_name: taskflow-frontend
+    depends_on:
+      - task-service
+    ports:
+      - "5173:80"
+    networks:
+      - taskflow
+
+# Named volumes keep state when containers are recreated.
+# Use "docker compose down -v" only when you intentionally want to
+# delete the local database/Kafka/Redis data.
+volumes:
+  postgres-data:
+  postgres-notifications-data:
+  redis-data:
+  kafka-data:
+
+# All application and infrastructure containers share this private bridge
+# network and can reach each other using their Compose service names.
+networks:
+  taskflow:
+    driver: bridge
