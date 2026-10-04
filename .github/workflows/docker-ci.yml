@@ -1,0 +1,66 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGISTRY: 881490104065.dkr.ecr.ap-south-1.amazonaws.com
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build task-service
+        run: |
+          docker build \
+            -t $REGISTRY/taskflow-task-service:$IMAGE_TAG \
+            ./task-service
+
+      - name: Push task-service
+        run: |
+          docker push \
+            $REGISTRY/taskflow-task-service:$IMAGE_TAG
+
+      - name: Build notification-service
+        run: |
+          docker build \
+            -t $REGISTRY/taskflow-notification-service:$IMAGE_TAG \
+            ./notification-service
+
+      - name: Push notification-service
+        run: |
+          docker push \
+            $REGISTRY/taskflow-notification-service:$IMAGE_TAG
+
+      - name: Build frontend
+        run: |
+          docker build \
+            -t $REGISTRY/taskflow-frontend:$IMAGE_TAG \
+            ./frontend
+
+      - name: Push frontend
+        run: |
+          docker push \
+            $REGISTRY/taskflow-frontend:$IMAGE_TAG
