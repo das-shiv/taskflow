@@ -29,38 +29,100 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # ------------------------------------------------------------
+      # Task Service
+      # ------------------------------------------------------------
+
+      - name: Check task-service image
+        id: task-service-check
+        run: |
+          if aws ecr describe-images \
+            --repository-name taskflow-task-service \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "task-service:$IMAGE_TAG already exists. Skipping build and push."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "task-service:$IMAGE_TAG does not exist. Build required."
+          fi
+
       - name: Build task-service
+        if: steps.task-service-check.outputs.exists != 'true'
         run: |
           docker build \
             -t $REGISTRY/taskflow-task-service:$IMAGE_TAG \
             ./task-service
 
       - name: Push task-service
+        if: steps.task-service-check.outputs.exists != 'true'
         run: |
           docker push \
             $REGISTRY/taskflow-task-service:$IMAGE_TAG
 
+      # ------------------------------------------------------------
+      # Notification Service
+      # ------------------------------------------------------------
+
+      - name: Check notification-service image
+        id: notification-service-check
+        run: |
+          if aws ecr describe-images \
+            --repository-name taskflow-notification-service \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "notification-service:$IMAGE_TAG already exists. Skipping build and push."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "notification-service:$IMAGE_TAG does not exist. Build required."
+          fi
+
       - name: Build notification-service
+        if: steps.notification-service-check.outputs.exists != 'true'
         run: |
           docker build \
             -t $REGISTRY/taskflow-notification-service:$IMAGE_TAG \
             ./notification-service
 
       - name: Push notification-service
+        if: steps.notification-service-check.outputs.exists != 'true'
         run: |
           docker push \
             $REGISTRY/taskflow-notification-service:$IMAGE_TAG
 
+      # ------------------------------------------------------------
+      # Frontend
+      # ------------------------------------------------------------
+
+      - name: Check frontend image
+        id: frontend-check
+        run: |
+          if aws ecr describe-images \
+            --repository-name taskflow-frontend \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" \
+            >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "frontend:$IMAGE_TAG already exists. Skipping build and push."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "frontend:$IMAGE_TAG does not exist. Build required."
+          fi
+
       - name: Build frontend
+        if: steps.frontend-check.outputs.exists != 'true'
         run: |
           docker build \
             -t $REGISTRY/taskflow-frontend:$IMAGE_TAG \
             ./frontend
 
       - name: Push frontend
+        if: steps.frontend-check.outputs.exists != 'true'
         run: |
           docker push \
             $REGISTRY/taskflow-frontend:$IMAGE_TAG
