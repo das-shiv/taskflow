@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 env:
-  REGISTRY: 881490104065.dkr.ecr.ap-south-1.amazonaws.com
+  REGISTRY: 881490104065.dkr.ecr.us-east-1.amazonaws.com
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
